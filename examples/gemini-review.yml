@@ -1,0 +1,74 @@
+# A standalone blocking Gemini review, meant to be a required check beside
+# your deterministic gates. Copy to .github/workflows/gemini-review.yml, set
+# the `system` sentence and the `exclude` list, and pin both actions by SHA.
+#
+# `pull_request` reviews the PR. `workflow_dispatch` replays the calibration
+# corpus instead: every .github/gemini-review-calibration/{reject,approve}-*.diff
+# goes to the live model and the job fails on a verdict that does not match
+# the file name. Run that before changing the model pin or the policy file,
+# never per PR.
+name: Gemini Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+# Only the tip of a branch matters: a push superseding the head under review
+# cancels it rather than paying for a second verdict on a stale head.
+concurrency:
+  group: gemini-review-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # The REJECT reasons are posted on the PR.
+  pull-requests: write
+
+env:
+  SYSTEM: a TypeScript service that does X for Y
+  POLICY_FILE: .github/gemini-review-policy.md
+  # Paths that carry regenerated or bulk content a review cannot act on. The
+  # calibration corpus is excluded because its files are planted defects by
+  # design.
+  EXCLUDE: |
+    pnpm-lock.yaml
+    package-lock.json
+    yarn.lock
+    **/*.generated.*
+    **/*.snap
+    .github/gemini-review-calibration/**
+
+jobs:
+  gemini-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    # Three retries with backoff top out under two minutes; the rest is one
+    # model call. A hung call must fail the job, not hold the merge for the
+    # 6-hour default.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          # The merge-base diff needs both the base branch and the head.
+          fetch-depth: 0
+      - uses: amir-gorji/gemini-review-gate@<sha> # v1
+        with:
+          gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
+          system: ${{ env.SYSTEM }}
+          policy-file: ${{ env.POLICY_FILE }}
+          exclude: ${{ env.EXCLUDE }}
+
+  calibrate:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: amir-gorji/gemini-review-gate@<sha> # v1
+        with:
+          gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
+          system: ${{ env.SYSTEM }}
+          policy-file: ${{ env.POLICY_FILE }}
+          mode: calibrate
+          calibration-dir: .github/gemini-review-calibration

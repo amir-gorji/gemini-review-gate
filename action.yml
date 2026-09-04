@@ -1,0 +1,92 @@
+name: Gemini Review Gate
+description: >-
+  Send a pull request's merge-base diff to a pinned Gemini model at temperature 0
+  and fail the check on a REJECT verdict, with the reasons posted on the PR.
+  Fails closed on everything that is not a literal APPROVE.
+author: amir-gorji
+
+inputs:
+  gemini-api-key:
+    description: The Gemini API key. Pass a repository secret; a fork PR sees none and the check reports unavailable, not rejected.
+    required: true
+  system:
+    description: One sentence naming the system under review, e.g. "an invoicing service for small businesses".
+    required: true
+  policy-file:
+    description: Path (from the repository root) to a markdown file listing what the reviewer may REJECT for. Inlined into the prompt verbatim.
+    required: true
+  exclude:
+    description: Git pathspecs to leave out of the reviewed diff, one per line (generated files, lockfiles, bulk fixtures). Written without the leading ":!".
+    required: false
+    default: ''
+  docs-only-suffixes:
+    description: Comma-separated suffixes; a diff in which every changed path ends in one of them passes without a model call.
+    required: false
+    default: '.md'
+  model:
+    description: The Gemini model id. Pin a stable id on a required check; a preview id's deprecation is a red on every PR at once.
+    required: false
+    default: 'gemini-3.8-flash'
+  max-diff-bytes:
+    description: A reviewable diff larger than this is reported unavailable (exit 3) with "split the unit", never reviewed in part.
+    required: false
+    default: '250000'
+  mode:
+    description: '"review" (default) reviews the pull request; "calibrate" replays the corpus in calibration-dir and fails on any unexpected verdict.'
+    required: false
+    default: 'review'
+  calibration-dir:
+    description: Directory of reject-*.diff and approve-*.diff files for mode "calibrate".
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: '3.12'
+
+    - name: Install the pinned Gemini client
+      shell: bash
+      run: pip install --quiet google-genai==2.22.0
+
+    - name: Self-check the verdict parser, the fence and the exclusions
+      shell: bash
+      env:
+        SYSTEM: ${{ inputs.system }}
+        POLICY_FILE: ${{ inputs.policy-file }}
+        EXCLUDE: ${{ inputs.exclude }}
+        DOCS_ONLY_SUFFIXES: ${{ inputs.docs-only-suffixes }}
+        MODEL: ${{ inputs.model }}
+        MAX_DIFF_BYTES: ${{ inputs.max-diff-bytes }}
+      run: python3 "${{ github.action_path }}/review.py" --self-check
+
+    - name: Review the diff
+      if: inputs.mode == 'review'
+      shell: bash
+      env:
+        GEMINI_API_KEY: ${{ inputs.gemini-api-key }}
+        GH_TOKEN: ${{ github.token }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        SYSTEM: ${{ inputs.system }}
+        POLICY_FILE: ${{ inputs.policy-file }}
+        EXCLUDE: ${{ inputs.exclude }}
+        DOCS_ONLY_SUFFIXES: ${{ inputs.docs-only-suffixes }}
+        MODEL: ${{ inputs.model }}
+        MAX_DIFF_BYTES: ${{ inputs.max-diff-bytes }}
+      run: python3 "${{ github.action_path }}/review.py"
+
+    - name: Replay the calibration corpus
+      if: inputs.mode == 'calibrate'
+      shell: bash
+      env:
+        GEMINI_API_KEY: ${{ inputs.gemini-api-key }}
+        SYSTEM: ${{ inputs.system }}
+        POLICY_FILE: ${{ inputs.policy-file }}
+        EXCLUDE: ${{ inputs.exclude }}
+        MODEL: ${{ inputs.model }}
+        MAX_DIFF_BYTES: ${{ inputs.max-diff-bytes }}
+      run: python3 "${{ github.action_path }}/review.py" --calibrate "${{ inputs.calibration-dir }}"

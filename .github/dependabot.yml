@@ -1,0 +1,10 @@
+version: 2
+
+# The setup-python pin inside action.yml and the pins in the self-check
+# workflow. The google-genai version is pinned in a `pip install` line in
+# action.yml, which Dependabot cannot see; bump it by hand.
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

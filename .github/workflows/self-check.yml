@@ -1,0 +1,36 @@
+# The action's own gate: the verdict parser, the nonce fence, the docs-only
+# rule and the pathspec check, run against the example policy on every push
+# and pull request. No model call and no key: the live behaviour is exercised
+# by the repositories that use the action, on their own pull requests.
+name: Self-check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  self-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Self-check against the example policy
+        env:
+          SYSTEM: the gemini-review-gate action itself
+          POLICY_FILE: policy.example.md
+          EXCLUDE: |
+            calibration/**
+        run: python3 review.py --self-check
+      - name: The capture script refuses a bad name and an empty diff
+        run: |
+          set -euo pipefail
+          if scripts/capture-case.sh nope README.md; then exit 1; fi
+          if scripts/capture-case.sh reject-empty README.md; then exit 1; fi
+          [ ! -e calibration/reject-empty.diff ]
