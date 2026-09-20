@@ -31,6 +31,7 @@ import secrets
 import subprocess
 import sys
 import time
+import traceback
 from pathlib import Path
 from typing import NamedTuple
 
@@ -114,8 +115,14 @@ def is_docs_only(files: list[str], suffixes: tuple[str, ...]) -> bool:
     return bool(files) and all(f.endswith(suffixes) for f in files)
 
 
+def decode_git(out: bytes) -> str:
+    # A diff is whatever bytes the tree holds: a Latin-1 text file, a PDF git
+    # sniffed as text. A strict decode turned one into a traceback.
+    return out.decode("utf-8", errors="replace")
+
+
 def run_git(*args: str) -> str:
-    return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout
+    return decode_git(subprocess.run(["git", *args], check=True, capture_output=True).stdout)
 
 
 def reviewable_diff(base_sha: str, head_sha: str, exclude: tuple[str, ...]) -> tuple[list[str], str]:
@@ -243,7 +250,18 @@ def calibrate(directory: str) -> int:
     return 1 if failures else 0
 
 
+def review_or_unavailable() -> int:
+    """A crash is the reviewer failing, never the diff: Python's default exit
+    for a traceback is 1, and 1 means REJECT."""
+    try:
+        return review()
+    except Exception:
+        traceback.print_exc()
+        return unavailable("the reviewer crashed before a verdict; the traceback is above")
+
+
 def self_check() -> int:
+    assert decode_git(b"caf\xe9 \xe2\x80\x94") == "caf\ufffd \u2014"
     assert parse_verdict("APPROVE") == "APPROVE"
     assert parse_verdict("\n\n  **REJECT**\n- reason") == "REJECT"
     assert parse_verdict('"Reject."') == "REJECT"
@@ -281,4 +299,4 @@ if __name__ == "__main__":
         sys.exit(self_check())
     if "--calibrate" in args:
         sys.exit(calibrate(args[args.index("--calibrate") + 1]))
-    sys.exit(review())
+    sys.exit(review_or_unavailable())

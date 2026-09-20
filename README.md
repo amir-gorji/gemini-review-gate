@@ -18,12 +18,12 @@ It is generic: the prompt, the diff shape, the fence, the retry, and the exit co
    The parser takes the first non-empty line, strips markdown decoration, and requires the bare word `APPROVE` or `REJECT`; anything else fails closed.
 5. `REJECT` posts the reply as a PR comment headed by the reviewed head SHA and fails the job.
 
-| Exit | Meaning                                                                                                     |
-| ---- | ----------------------------------------------------------------------------------------------------------- |
-| 0    | `APPROVE`, or a diff with nothing reviewable (documentation only, or only excluded paths)                  |
-| 1    | `REJECT`; the reasons are on the PR                                                                         |
-| 2    | The reply started with neither word; read the log                                                           |
-| 3    | The reviewer was unavailable: no key, the API down after three retries with backoff, diff over the byte cap |
+| Exit | Meaning                                                                                                                                     |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | `APPROVE`, or a diff with nothing reviewable (documentation only, or only excluded paths)                                                   |
+| 1    | `REJECT`; the reasons are on the PR                                                                                                         |
+| 2    | The reply started with neither word; read the log                                                                                           |
+| 3    | The reviewer was unavailable: no key, the API down after three retries with backoff, diff over the byte cap, or the reviewer itself crashed |
 
 **Exit 2 and 3 are never a rejection.** Re-run for 3, read the log for 2.
 A required check that passes on "the model wrote something else" or "the API was down" is a check an author can wait out, so neither passes.
@@ -201,6 +201,8 @@ Things that were tried and rejected, so you do not have to try them again:
   Ten fixed lines is predictable against the cap.
 - **"Structural bloat" as a reject reason** produced rejections nobody acted on.
   It is advisory now, like everything else the policy does not name.
+- **A strict UTF-8 decode of the diff** died on the first PDF git sniffed as text, and the traceback's default exit 1 read as a rejection.
+  The diff decodes with replacement now, and any crash before a verdict is exit 3.
 - **Raising straight to exit 1 on a 5xx** made an outage indistinguishable from a rejection, and a fork PR (no secrets) indistinguishable from a bad one.
 
 ## Using it from a private repository
